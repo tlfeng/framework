@@ -426,6 +426,16 @@ func (m *ElasticsearchMetric) InitialCollectTask(k string, v *elastic.Elasticsea
 	return true
 }
 
+// Both values are numeric JSON fields from the same JVM observation.
+func estimateJVMStart(jvm map[string]interface{}) (int64, bool) {
+	ts, hasTimestamp := jvm["timestamp"].(float64)
+	uptime, hasUptime := jvm["uptime_in_millis"].(float64)
+	if !hasTimestamp || !hasUptime || !(ts > uptime && uptime >= 0 && ts < 1<<53) || ts != float64(int64(ts)) || uptime != float64(int64(uptime)) {
+		return 0, false
+	}
+	return int64(ts) - int64(uptime), true
+}
+
 func (m *ElasticsearchMetric) SaveNodeStats(v *elastic.ElasticsearchMetadata, nodeID string, f interface{}, shardInfo interface{}) error {
 	//remove adaptive_selection
 	x, ok := f.(map[string]interface{})
@@ -439,6 +449,12 @@ func (m *ElasticsearchMetric) SaveNodeStats(v *elastic.ElasticsearchMetadata, no
 		delete(x, "ingest")
 		util.MapStr(x).Delete("indices.segments.max_unsafe_auto_id_timestamp")
 		x["shard_info"] = shardInfo
+	}
+	if jvm, ok := x["jvm"].(map[string]interface{}); ok {
+		delete(jvm, "start_time_estimate_in_millis")
+		if start, ok := estimateJVMStart(jvm); ok {
+			jvm["start_time_estimate_in_millis"] = start
+		}
 	}
 	nodeName := x["name"]
 	nodeIP := x["ip"]
