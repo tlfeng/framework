@@ -45,7 +45,6 @@ import (
 	"context"
 	"crypto/x509"
 	"io/ioutil"
-	"math"
 	"net"
 	"net/http"
 	uri "net/url"
@@ -491,26 +490,13 @@ var defaultClient = &http.Client{
 	CheckRedirect: nil,
 }
 
-type responseBodyLimitKey struct{}
-
-// ErrResponseBodyTooLarge indicates that the decoded response exceeded its limit.
-var ErrResponseBodyTooLarge = fmt.Errorf("decoded HTTP response exceeds the body limit")
-
-// WithResponseBodyLimit opts into a decoded body limit for one HTTP response.
-func WithResponseBodyLimit(ctx context.Context, limit int64) context.Context {
-	return context.WithValue(ctx, responseBodyLimitKey{}, limit)
-}
-
 func execute(client *http.Client, req *http.Request) (*Result, error) {
 	result := &Result{}
 	resp, err := client.Do(req)
-	limit, limited := req.Context().Value(responseBodyLimitKey{}).(int64)
 
 	defer func() {
 		if resp != nil && resp.Body != nil {
-			if !limited {
-				io.Copy(ioutil.Discard, resp.Body)
-			}
+			io.Copy(ioutil.Discard, resp.Body)
 			resp.Body.Close()
 		}
 	}()
@@ -554,28 +540,6 @@ func execute(client *http.Client, req *http.Request) (*Result, error) {
 			return nil, err
 			//panic(err)
 		}
-	}
-
-	if limited && reader != nil {
-		if reader != resp.Body {
-			defer reader.Close()
-		}
-		if limit < 0 {
-			return result, ErrResponseBodyTooLarge
-		}
-		readLimit := limit
-		if readLimit < math.MaxInt64 {
-			readLimit++
-		}
-		body, err := io.ReadAll(io.LimitReader(reader, readLimit))
-		if int64(len(body)) > limit {
-			return result, ErrResponseBodyTooLarge
-		}
-		if err != nil {
-			return result, err
-		}
-		result.Body, result.Size = body, uint64(len(body))
-		return result, nil
 	}
 
 	if reader != nil {
